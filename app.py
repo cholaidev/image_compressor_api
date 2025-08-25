@@ -33,9 +33,12 @@ def upscale():
 
         print(f"🔹 Step 4: Preparing ESRGAN command...")
         cmd = [
-            REALESRGAN_BIN,
-            "-i", input_path,
-            "-o", output_path
+           "sudo", 
+           REALESRGAN_BIN,
+    "-m", f"{BASE_DIR}/models-DF2K_JPEG/",
+    "-n", "x4",
+    "-i", input_path,
+    "-o", output_path
         ]
         print("⚡ Command:", " ".join(cmd))
 
@@ -45,7 +48,7 @@ def upscale():
 
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
-        
+
 
         if result.returncode != 0:
             print("❌ ESRGAN process failed")
