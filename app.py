@@ -45,6 +45,7 @@ def upscale():
 
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
+        
 
         if result.returncode != 0:
             print("❌ ESRGAN process failed")
