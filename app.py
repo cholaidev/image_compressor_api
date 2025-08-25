@@ -1,72 +1,86 @@
-from flask import Flask, request, send_file
-import subprocess
-import tempfile
 import os
-import shutil
+import subprocess
+import time
+from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
 
-# ✅ Full path to realesrgan binary in your server
-REALESRGAN_PATH = "/home/cholai/realesrgan-ncnn-vulkan-v0.2.0-ubuntu/realesrgan-ncnn-vulkan"
+BASE_DIR = "/home/cholai/realesrgan-ncnn-vulkan-v0.2.0-ubuntu"
+REALESRGAN_BIN = os.path.join(BASE_DIR, "realesrgan-ncnn-vulkan")
 
-@app.route("/upscale", methods=["POST"])
-def upscale_image():
-    print("📩 Request received at /upscale")
-
-    if "image" not in request.files:
-        print("❌ No image uploaded in request")
-        return {"error": "No image uploaded"}, 400
-
-    file = request.files["image"]
-    print(f"✅ Image received: {file.filename}")
-
-    # Save input to temp file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_in:
-        temp_in_path = temp_in.name
-        file.save(temp_in_path)
-
-    print(f"📂 Temp input file saved: {temp_in_path}")
-
-    # Output file path
-    temp_out_path = tempfile.mktemp(suffix=".jpg")
-
-    # Build realesrgan command
-    cmd = [
-        REALESRGAN_PATH,
-        "-i", temp_in_path,
-        "-o", temp_out_path,
-        "-s", "2"  # scale factor 2x
-    ]
-
-    print(f"🚀 Running command: {' '.join(cmd)}")
-
+@app.route('/upscale', methods=['POST'])
+def upscale():
     try:
-        subprocess.run(cmd, check=True)
-        print(f"✅ Upscale successful, output saved: {temp_out_path}")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Upscale failed: {e}")
-        return {"error": f"Upscale failed: {str(e)}"}, 500
-    except FileNotFoundError:
-        print(f"❌ Executable not found: {REALESRGAN_PATH}")
-        return {"error": f"Executable not found: {REALESRGAN_PATH}"}, 500
+        print("🔹 Step 1: Checking request method...")
+        print("   Method received:", request.method)
 
-    # Copy output to avoid file lock issues
-    final_out = tempfile.mktemp(suffix=".jpg")
-    shutil.copy(temp_out_path, final_out)
+        print("🔹 Step 2: Checking uploaded file...")
+        if 'image' not in request.files:
+            print("❌ No file part in request.files")
+            return jsonify({"error": "No image uploaded"}), 400
 
-    # Cleanup temp files
-    os.remove(temp_in_path)
-    os.remove(temp_out_path)
+        file = request.files['image']
+        print("✅ File received:", file.filename)
 
-    print(f"📤 Sending upscaled image back: {final_out}")
+        # 🔹 Add timestamp to avoid overwriting files
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        input_path = os.path.join(BASE_DIR, f"input_{timestamp}.jpg")
+        output_path = os.path.join(BASE_DIR, f"output_{timestamp}.png")
 
-    return send_file(
-        final_out,
-        mimetype="image/jpeg",
-        as_attachment=True,
-        download_name="upscaled.jpg"
-    )
+        print(f"🔹 Step 3: Saving input file to {input_path} ...")
+        file.save(input_path)
+        print("✅ File saved")
+
+        print(f"🔹 Step 4: Preparing ESRGAN command...")
+        cmd = [
+            REALESRGAN_BIN,
+            "-i", input_path,
+            "-o", output_path
+        ]
+        print("⚡ Command:", " ".join(cmd))
+
+        print("🔹 Step 5: Running ESRGAN...")
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        print("✅ ESRGAN finished")
+
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+
+        if result.returncode != 0:
+            print("❌ ESRGAN process failed")
+            return jsonify({
+                "error": "Real-ESRGAN failed",
+                "stderr": result.stderr,
+                "stdout": result.stdout
+            }), 500
+
+        print("🔹 Step 6: Checking output file...")
+        if not os.path.exists(output_path):
+            print("❌ Output not generated")
+            return jsonify({"error": "Output not generated"}), 500
+
+        print("✅ Output file ready, sending info back")
+        return jsonify({
+            "message": "Upscaling successful",
+            "input_file": os.path.basename(input_path),
+            "output_file": os.path.basename(output_path),
+            "download_url": f"/get-file/{os.path.basename(output_path)}"
+        })
+
+    except Exception as e:
+        print("🔥 Exception:", str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/get-file/<filename>", methods=["GET"])
+def get_file(filename):
+    """Allow downloading any saved input/output file by name"""
+    file_path = os.path.join(BASE_DIR, filename)
+    if not os.path.exists(file_path):
+        return jsonify({"error": "File not found"}), 404
+    return send_file(file_path)
+
 
 if __name__ == "__main__":
-    print("🚀 Starting Flask Real-ESRGAN server on http://0.0.0.0:5000")
+    print("🚀 Starting Flask server at http://0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
